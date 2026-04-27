@@ -136,6 +136,7 @@ let keyHistoryCollection;
 let dailyStatsCollection;
 let userStatsCollection;
 let ytCollection;
+let ytTrackedCollection;
 
 const COOLDOWN_TIME = 10 * 60 * 1000;
 const STAFF_ROLE_ID = "1449394350009356481";
@@ -1067,6 +1068,7 @@ shortcutCollection = db.collection("shortcuts");
     dailyStatsCollection = defaultDb.collection("dailystats");
     userStatsCollection = defaultDb.collection("userstats");
     ytCollection = defaultDb.collection("ytchannels");
+    ytTrackedCollection = defaultDb.collection("yttracked");
 
     console.log("Connected to MongoDB!");
 }
@@ -2343,10 +2345,10 @@ if (cmd === "?modhelp" || cmd === "?mp") {
             {
                 name: "**YouTube Script Commands** (Staff Only)",
                 value:
-                    "`?yt set <url>` - Auto scan 30 latest videos, output to designated channel\n" +
+                    "`?yt set <url>` - Auto scan 30 latest videos & track channel automatically every 1 hr\n" +
                     "`?yt <url> [quantity]` - Scan videos, output to current channel\n" +
-                    "`?yt remove <url>` - Remove a YT channel and all its scripts\n" +
-                    "`?ytl` / `?youtubelist` / `?ytlist` - List all YouTube-sourced scripts\n\n" +
+                    "`?yt remove <url>` - Remove a YT channel and stop tracking it\n" +
+                    "`?ytl` / `?youtubelist` / `?ytlist` - List all YouTube-sourced scripts\n                    `?ytsl` - List all currently tracked YouTube channels\n                    `?yts <number>` - View detailed info for a script from the `?ytl` list\n\n" +
                     "**Aliases:** `?youtube` works everywhere `?yt` does",
                 inline: false
             },
@@ -4163,8 +4165,10 @@ client.on("messageCreate", async (ytMsg) => {
 
     const isYtCmd = rawCmd === '?yt' || rawCmd === '?youtube';
     const isYtListCmd = ['?ytl', '?youtubel', '?youtubelist', '?ytlist'].includes(rawCmd);
+    const isYtslCmd = ['?ytsl'].includes(rawCmd);
+    const isYtsCmd = ['?yts'].includes(rawCmd);
 
-    if (!isYtCmd && !isYtListCmd) return;
+    if (!isYtCmd && !isYtListCmd && !isYtslCmd && !isYtsCmd) return;
 
     // Staff check for all yt commands
     if (!(await isStaff(ytMsg.author.id, ytMsg.member)) && ytMsg.author.id !== OWNER_ID) {
@@ -4190,6 +4194,51 @@ client.on("messageCreate", async (ytMsg) => {
         for (let chunk of chunks) {
             await ytMsg.channel.send(chunk);
         }
+        return;
+    }
+
+    
+    // ===== ?ytsl =====
+    if (isYtslCmd) {
+        const tracked = await ytTrackedCollection.find({}).toArray();
+        if (!tracked.length) return ytMsg.reply('📭 No tracked YouTube channels yet.');
+
+        let listContent = '**📡 Tracked YouTube Channels:**\n\n';
+        tracked.forEach((t, i) => {
+            listContent += `**${i+1}.** \`${t.channelHandle}\` (\n${t.channelUrl}\n)\n`;
+        });
+        
+        const chunks = listContent.match(/[\s\S]{1,1900}/g) || [];
+        for (let chunk of chunks) {
+            await ytMsg.channel.send(chunk);
+        }
+        return;
+    }
+
+    // ===== ?yts <number> =====
+    if (isYtsCmd) {
+        let scriptIndex = parseInt(rawArgs[0]);
+        if (isNaN(scriptIndex)) return ytMsg.reply('❌ Usage: `?yts <number>`');
+        
+        const allScripts = await ytCollection.find({}).sort({ addedAt: 1 }).toArray();
+        if (scriptIndex < 1 || scriptIndex > allScripts.length) return ytMsg.reply(`❌ Invalid number. Choose between 1 and ${allScripts.length}`);
+        
+        const script = allScripts[scriptIndex - 1];
+        
+        const embed = new EmbedBuilder()
+            .setTitle("✅ Found YouTube Script!")
+            .setColor("Green")
+            .addFields(
+                { name: "📝 Script Name", value: `\`${script.scriptName}\``, inline: false },
+                { name: "🎬 Video Url", value: `${script.videoUrl}`, inline: false },
+                { name: "🌐 GitHub URL", value: `\`${script.githubUrl}\``, inline: false },
+                { name: "⚙️ Features", value: script.features || "N/A", inline: true },
+                { name: "🎮 Roblox ID", value: script.robloxId || "N/A", inline: true }
+            )
+            .setTimestamp();
+            
+        await ytMsg.channel.send({ embeds: [embed] });
+        await ytMsg.channel.send(`\`\`\`lua\nloadstring(game:HttpGet("${script.githubUrl}"))()\n\`\`\``);
         return;
     }
 
@@ -4221,9 +4270,7 @@ client.on("messageCreate", async (ytMsg) => {
 
     // ===== ?yt remove <url> =====
     if (subArg === 'remove') {
-        if (ytMsg.author.id !== OWNER_ID) {
-            return ytMsg.reply('❌ Only the bot owner can remove YouTube channels.');
-        }
+        
 
         const channelUrl = rawArgs[1];
         if (!channelUrl) return ytMsg.reply('❌ Usage: `?yt remove <youtube_channel_url>`');
