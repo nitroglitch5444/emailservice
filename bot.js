@@ -1656,6 +1656,8 @@ client.once("ready", async () => {
             } else {
                 await giveawayCollection.deleteOne({ messageId: giveaway.messageId });
             }
+        }
+
     // Background YouTube Scraper Loop (Optimized with MongoDB)
     setInterval(async () => {
         try {
