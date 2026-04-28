@@ -2639,105 +2639,7 @@ if (customName && customName.length >= 2) {
     await message.reply({ embeds: [embed] });
     await message.channel.send(loadstringCode);
 }
-// ===== BULLY (TROLL VC DRAG) COMMAND =====
-const activeBullySessions = new Map();
 
-if (cmd === "?bully") {
-    if (!(await isStaff(message.author.id, message.member)) && message.author.id !== OWNER_ID) {
-        return message.reply("❌ Staff only.");
-    }
-
-    const target = message.mentions.members.first();
-    const duration = parseInt(args[1]);
-
-    if (!target || !duration || isNaN(duration) || duration < 1 || duration > 300) {
-        return message.reply("❌ Usage: `?bully @user <seconds>` (max 300s)");
-    }
-
-    // Check if target is in a VC
-    const originalVC = target.voice.channel;
-    if (!originalVC) {
-        return message.reply(`❌ **${target.user.username}** kisi VC mein nahi hai!`);
-    }
-
-    // Check if already being bullied
-    if (activeBullySessions.has(target.id)) {
-        return message.reply(`⚠️ **${target.user.username}** already bully session mein hai!`);
-    }
-
-    // Get all voice channels in guild
-    const allVCs = message.guild.channels.cache.filter(
-        ch => ch.type === 2 && ch.id !== originalVC.id // 2 = GuildVoice
-    );
-
-    if (allVCs.size === 0) {
-        return message.reply("❌ Koi aur VC nahi hai server mein!");
-    }
-
-    const vcArray = [...allVCs.values()];
-
-    await message.reply(`😈 **${target.user.username}** ko ${duration}s ke liye drag kar raha hoon...`);
-
-    // Mark as active
-    activeBullySessions.set(target.id, true);
-
-    let elapsed = 0;
-    const interval = setInterval(async () => {
-        elapsed += 1.5;
-
-        // Check if session was stopped or user left VC
-        if (!activeBullySessions.has(target.id) || elapsed >= duration) {
-            clearInterval(interval);
-            activeBullySessions.delete(target.id);
-
-            // Move back to original VC
-            try {
-                const freshMember = await message.guild.members.fetch(target.id);
-                if (freshMember.voice.channel) {
-                    await freshMember.voice.setChannel(originalVC);
-                    message.channel.send(`✅ **${target.user.username}** wapas **${originalVC.name}** mein!`);
-                }
-            } catch (e) {
-                console.error("Bully end move error:", e.message);
-            }
-            return;
-        }
-
-        // Move to random VC
-        try {
-            const freshMember = await message.guild.members.fetch(target.id);
-            if (!freshMember.voice.channel) {
-                // User left VC, stop session
-                clearInterval(interval);
-                activeBullySessions.delete(target.id);
-                message.channel.send(`⚠️ **${target.user.username}** VC se nikal gaya, session stop!`);
-                return;
-            }
-
-            const randomVC = vcArray[Math.floor(Math.random() * vcArray.length)];
-            await freshMember.voice.setChannel(randomVC);
-        } catch (e) {
-            console.error("Bully move error:", e.message);
-        }
-    }, 1500); // har 1.5 sec pe move
-}
-
-// ===== BULLY STOP =====
-if (cmd === "?bullystop") {
-    if (!(await isStaff(message.author.id, message.member)) && message.author.id !== OWNER_ID) {
-        return message.reply("❌ Staff only.");
-    }
-
-    const target = message.mentions.members.first();
-    if (!target) return message.reply("❌ Kise stop karna hai? `?bullystop @user`");
-
-    if (!activeBullySessions.has(target.id)) {
-        return message.reply(`⚠️ **${target.user.username}** ka koi active bully session nahi hai.`);
-    }
-
-    activeBullySessions.delete(target.id); // interval khud cleanup karega
-    return message.reply(`🛑 **${target.user.username}** ka bully session stop kar diya!`);
-}
     // ===== NEW SCRIPT COMMAND =====
     if (cmd === "?ns") {
         if (!(await isStaff(message.author.id, message.member))) {
@@ -4337,6 +4239,23 @@ client.on("messageCreate", async (ytMsg) => {
         }
     }
 
+        const videoMatch = urlToFetch.match(/v=([^&]+)/) || urlToFetch.match(/youtu\.be\/([^?]+)/);
+        if (videoMatch) {
+             const videoId = videoMatch[1];
+             await ytMsg.reply(`⏳ Processing single video \`${videoId}\`... outputting to <#${TARGET_CHANNEL_ID}>`);
+             await processSingleVideo(videoId, ytMsg, TARGET_CHANNEL_ID);
+             return;
+        } else {
+             await ytMsg.reply(`⏳ Scanning channel \`${urlToFetch}\`... outputting to <#${TARGET_CHANNEL_ID}>`);
+             const res = await scanYouTubeChannel(urlToFetch, ytMsg, TARGET_CHANNEL_ID, 30);
+             if (!res.success) {
+                  return ytMsg.channel.send(`❌ Scan failed: ${res.reason}`);
+             }
+             await ytMsg.reply(`✅ Finished scanning channel.`);
+             return;
+        }
+    }
+
     // ===== ?yt remove <url> =====
     if (subArg === 'remove') {
         
@@ -4351,10 +4270,9 @@ client.on("messageCreate", async (ytMsg) => {
         }
 
         if (channelHandle) {
-             await ytMsg.reply(`⏳ Removing channel \`${channelHandle}\` scripts and tracking from DB...`);
-             await ytTrackedCollection.deleteOne({ channelHandle: channelHandle });
+             await ytMsg.reply(`⏳ Removing channel \`${channelHandle}\` scripts from DB...`);
              const res = await ytCollection.deleteMany({ channelHandle: channelHandle });
-             return ytMsg.reply(`✅ Removed ${res.deletedCount} scripts from channel \`${channelHandle}\` and stopped tracking.`);
+             return ytMsg.reply(`✅ Removed ${res.deletedCount} scripts from channel \`${channelHandle}\`.`);
         }
         
         const removedScript = await ytCollection.deleteOne({ scriptName: channelUrl });
