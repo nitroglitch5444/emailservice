@@ -2343,7 +2343,7 @@ if (cmd === "?modhelp" || cmd === "?mp") {
             {
                 name: "**YouTube Script Commands** (Staff Only)",
                 value:
-                    "`?yt set <channel_url>` - Add a YT channel, scan 30 latest videos, bypass & upload scripts\n" +
+                    "`?yt set <channel_url> [count]` - Add a YT channel, scan N videos (default 30), bypass & upload scripts\n" +
                     "`?yt remove <channel_url>` - Remove a YT channel and all its scripts\n" +
                     "`?yt <name or number>` - Get loadstring for a script (e.g. `?yt FatToFit` or `?yt 3`)\n" +
                     "`?ytl` / `?youtubelist` / `?ytlist` - List all YouTube-sourced scripts\n" +
