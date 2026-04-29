@@ -149,7 +149,8 @@ const GITHUB_BACKUP_REPO = "backup";
 const GITHUB_DIRECTX_REPO = "directx";
 const GITHUB_BACKOPS_REPO = "backops";
 const GITHUB_BRANCH = "main";
-const REPO_OWNER = process.env.REPO_OWNER || "nitroglitch5444"; // ?repo wala
+const REPO_OWNER = process.env.REPO_OWNER || "nitroglitch5444";
+let ytTrackedCollection, ytProcessedCollection;
 
 // ========================================
 // IZEN BYPASS API CONFIGURATION
@@ -407,16 +408,13 @@ async function getBrowser() {
 
     console.log('🚀 Launching new browser session...');
     globalBrowser = await puppeteer.launch({
-        headless: "new",
+        headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-software-rasterizer',
             '--no-first-run',
             '--no-zygote',
             '--single-process'
@@ -1058,6 +1056,9 @@ async function connectDB() {
     warnCollection = db.collection("warnings");
     balanceCollection = db.collection("balances");
     giveawayCollection = db.collection("giveaways");
+    ytCollection = db.collection("yt_scripts");
+    ytTrackedCollection = db.collection("yt_tracked_channels");
+    ytProcessedCollection = db.collection("yt_processed_videos");
     logCollection = db.collection("logs");
     permissionCollection = db.collection("permissions");
 devIdCollection = db.collection("devids"); // NEW
@@ -3962,7 +3963,7 @@ async function scanYouTubeChannel(channelUrl, message, limit = 30) {
     if (!videos.length) return { success: false, reason: 'Could not fetch videos. Check the channel URL and make sure it is a public channel.' };
 
     // PERSISTENCE: Get last processed video ID
-    const config = await ytCollection.findOne({ type: 'config', channelUrl });
+    const config = await ytTrackedCollection.findOne({ channelUrl });
     const lastVideoId = config?.lastProcessedVideoId;
 
     // Slice to user-defined limit or default
@@ -3977,7 +3978,14 @@ async function scanYouTubeChannel(channelUrl, message, limit = 30) {
     const latestId = videosToProcess[0]?.id;
 
     for (const video of videosToProcess) {
-        // STOP if we hit a video we already processed last time
+        // Check if already processed globally
+        const isProcessed = await ytProcessedCollection.findOne({ videoId: video.id });
+        if (isProcessed) {
+            results.push({ scriptName: video.title, skipped: true });
+            continue;
+        }
+
+        // STOP if we hit a video we already processed last time for THIS channel
         if (lastVideoId && video.id === lastVideoId) {
             await message.channel.send(`⏭️ Reached last processed video (\`${video.id}\`), stopping scan.`);
             break;
@@ -4051,7 +4059,6 @@ async function scanYouTubeChannel(channelUrl, message, limit = 30) {
 
         // Save to MongoDB
         await ytCollection.insertOne({
-            type: 'script',
             videoId: video.id,
             scriptName,
             fileName,
@@ -4066,6 +4073,13 @@ async function scanYouTubeChannel(channelUrl, message, limit = 30) {
             addedAt: new Date()
         });
 
+        // Mark as processed
+        await ytProcessedCollection.insertOne({
+            videoId: video.id,
+            channelUrl,
+            processedAt: new Date()
+        });
+
         await statusMsg.edit(`✅ **[${processed}]** \`${scriptName}\` done!`);
         setTimeout(() => statusMsg.delete().catch(() => {}), 4000);
         results.push({ scriptName, githubUrl, videoUrl, success: true });
@@ -4076,8 +4090,8 @@ async function scanYouTubeChannel(channelUrl, message, limit = 30) {
 
     // Update persistence checkpoint to most recent video ID
     if (latestId) {
-        await ytCollection.updateOne(
-            { type: 'config', channelUrl },
+        await ytTrackedCollection.updateOne(
+            { channelUrl },
             { $set: { channelUrl, channelHandle, lastProcessedVideoId: latestId, limit, updatedAt: new Date() } },
             { upsert: true }
         );
@@ -4107,7 +4121,7 @@ client.on("messageCreate", async (ytMsg) => {
 
     // ===== ?ytsl =====
     if (isYtScanListCmd) {
-        const configs = await ytCollection.find({ type: 'config' }).sort({ updatedAt: -1 }).toArray();
+        const configs = await ytTrackedCollection.find().sort({ updatedAt: -1 }).toArray();
         if (!configs.length) return ytMsg.reply('📭 No YouTube channels currently tracked for auto-scanning.');
 
         let list = '**📋 Tracked YouTube Channels:**\n\n';
@@ -4128,7 +4142,7 @@ client.on("messageCreate", async (ytMsg) => {
 
     // ===== ?ytl / ?youtubelist =====
     if (isYtListCmd) {
-        const allScripts = await ytCollection.find({ type: { $ne: 'config' } }).sort({ addedAt: 1 }).toArray();
+        const allScripts = await ytCollection.find().sort({ addedAt: 1 }).toArray();
         if (!allScripts.length) return ytMsg.reply('📭 No YouTube scripts saved yet.');
 
         let list = '**📋 YouTube Scripts:**\n\n';
@@ -4204,25 +4218,24 @@ client.on("messageCreate", async (ytMsg) => {
         const channelUrl = rawArgs[1];
         if (!channelUrl) return ytMsg.reply('❌ Usage: `?yt remove <youtube_channel_url>`');
 
-        // Find all entries from this channel (scripts AND config)
-        const entries = await ytCollection.find({ channelUrl }).toArray();
+        await ytMsg.reply(`⏳ Removing channel config and processing history...`);
 
-        if (!entries.length) {
-            return ytMsg.reply(`⚠️ No data found for that channel URL.`);
-        }
-
-        await ytMsg.reply(`⏳ Removing channel config and **${entries.filter(e => e.type !== 'config').length}** scripts...`);
-
+        // Remove from tracked and scripts
+        await ytTrackedCollection.deleteOne({ channelUrl });
+        const scriptEntries = await ytCollection.find({ channelUrl }).toArray();
+        
         let removed = 0, failed = 0;
-        for (const e of entries) {
+        for (const e of scriptEntries) {
             if (e.fileName) {
-                // Delete from GitHub if it's a script
-                const del = await deleteGitHubFile(e.fileName, GITHUB_REPO);
+                await deleteGitHubFile(e.fileName, GITHUB_REPO);
                 await deleteGitHubFile(e.fileName, GITHUB_BACKUP_REPO).catch(() => {});
-                if (del) removed++; else failed++;
+                removed++;
             }
             await ytCollection.deleteOne({ _id: e._id });
         }
+        
+        // Also clear process history for this channel
+        await ytProcessedCollection.deleteMany({ channelUrl });
 
         const embed = new EmbedBuilder()
             .setTitle('🗑️ YouTube Channel Removed')
@@ -4319,7 +4332,7 @@ async function startYouTubeBackgroundLoop() {
 
         try {
             // Find all tracked channels
-            const trackedChannels = await ytCollection.find({ type: 'config' }).toArray();
+            const trackedChannels = await ytTrackedCollection.find().toArray();
             
             if (!trackedChannels.length) {
                 return logChannel.send('📭 No channels tracked for background scanning.');
