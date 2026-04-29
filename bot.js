@@ -102,8 +102,8 @@ if (req.method === 'POST' && req.url === '/api/feedback') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('Bot is running!');
     }
-}).listen(3000, () => {
-    console.log('Keep-alive server running on port 3000');
+}).listen(process.env.PORT || 3000, () => {
+    console.log(`Keep-alive server running on port ${process.env.PORT || 3000}`);
 });
 
 // Self-ping every 5 minutes
@@ -407,16 +407,14 @@ async function getBrowser() {
 
     console.log('🚀 Launching new browser session...');
     globalBrowser = await puppeteer.launch({
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+        headless: "new",
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-software-rasterizer',
+            '--no-first-run',
             '--no-zygote',
             '--single-process'
         ]
