@@ -1061,14 +1061,14 @@ async function connectDB() {
     ytProcessedCollection = db.collection("yt_processed_videos");
     logCollection = db.collection("logs");
     permissionCollection = db.collection("permissions");
-devIdCollection = db.collection("devids"); // NEW
-shortcutCollection = db.collection("shortcuts");
+    devIdCollection = db.collection("devids");
+    shortcutCollection = db.collection("shortcuts");
+    
     const defaultDb = mongoClient.db();
     activeKeyCollection = defaultDb.collection("activekeys");
     keyHistoryCollection = defaultDb.collection("keyhistories");
     dailyStatsCollection = defaultDb.collection("dailystats");
     userStatsCollection = defaultDb.collection("userstats");
-    ytCollection = defaultDb.collection("ytchannels");
 
     console.log("Connected to MongoDB!");
 }
@@ -2348,7 +2348,7 @@ if (cmd === "?modhelp" || cmd === "?mp") {
             {
                 name: "**YouTube Script Commands** (Staff Only)",
                 value:
-                    "`?yt set <channel_url>` - Add a YT channel, scan 30 latest videos, bypass & upload scripts\n" +
+                    "`?yt set <channel_url> [quantity]` - Add a YT channel, scan latest videos, bypass & upload scripts\n" +
                     "`?yt remove <channel_url>` - Remove a YT channel and all its scripts\n" +
                     "`?yt <name or number>` - Get loadstring for a script (e.g. `?yt FatToFit` or `?yt 3`)\n" +
                     "`?ytl` / `?youtubelist` / `?ytlist` - List all YouTube-sourced scripts\n" +
@@ -4374,6 +4374,7 @@ async function startYouTubeBackgroundLoop() {
 // Connect to database and login
 connectDB().then(() => {
     client.login(process.env.DISCORD_TOKEN);
+    startYouTubeBackgroundLoop();
 }).catch(err => {
     console.error("Failed to start bot:", err);
     process.exit(1);
